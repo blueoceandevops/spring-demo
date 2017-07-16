@@ -29,6 +29,12 @@ public class ServerSentEventController {
 	private ConcurrentHashMap<SseEmitter, Integer> sseEmitters = new ConcurrentHashMap<>();
 	private Set<SseEmitter> deadEmitters = new HashSet<SseEmitter>();
 
+	@RequestMapping(path = "count", method = RequestMethod.GET)
+	@ApiOperation("get active sse emitters count")
+	public int sseEmitterNum() {
+		return sseEmitters.size();
+	}
+
 	@RequestMapping(path = "closeall", method = RequestMethod.POST)
 	@ApiOperation("clean all active sse emitters")
 	public String closeAllSseEmitters() {
