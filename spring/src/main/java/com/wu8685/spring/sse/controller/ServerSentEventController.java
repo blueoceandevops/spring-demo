@@ -25,13 +25,30 @@ public class ServerSentEventController {
 	private ConcurrentHashMap<SseEmitter, Integer> sseEmitters = new ConcurrentHashMap<>();
 	private Set<SseEmitter> deadEmitters = new HashSet<SseEmitter>();
 
+	@RequestMapping("sse/closeall")
+	public String closeAllSseEmitters() {
+		for (Entry<SseEmitter, Integer> entry : sseEmitters.entrySet()) {
+			SseEmitter se = entry.getKey();
+			se.complete();
+			sseEmitters.remove(se);
+		}
+
+		return "success";
+	}
+
 	@RequestMapping("/sse/memory")
 	public SseEmitter serverSentEvent(@RequestHeader(name = "Last-Event-ID", required = false) String lastId)
 			throws IOException {
-		// keep connection timeout to 10s, defaultly 30s
-		SseEmitter sseEmitter = new CrossDomainAllowSseEmitter(10000L);
-		sseEmitter.onCompletion(() -> logger.debug("a event stream completed"));
-		sseEmitter.onTimeout(() -> logger.debug("a event stream timeout"));
+		// keep connection timeout to 20s, defaultly 30s
+		SseEmitter sseEmitter = new CrossDomainAllowSseEmitter(20000L);
+		sseEmitter.onCompletion(() -> {
+			sseEmitter.complete();
+			logger.warn("complete one sse emitter");
+		});
+		sseEmitter.onTimeout(() -> {
+			sseEmitter.complete();
+			logger.warn("complete one sse emitter with exception");
+		});
 
 		sseEmitters.put(sseEmitter, 1);
 		return sseEmitter;
@@ -39,25 +56,23 @@ public class ServerSentEventController {
 
 	@EventListener
 	public void onApplicationEvent(MemoryEvent event) {
-		synchronized (sseEmitters) {
-			deadEmitters.clear();
-			logger.debug("active sseEmitter is " + sseEmitters.size());
-			for (Entry<SseEmitter, Integer> entry : sseEmitters.entrySet()) {
-				SseEmitter se = entry.getKey();
-				try {
-					se.send(SseEmitter.event().id("static_id").name("memory_info")
-							.data(new Memory(event.getTotal(), event.getUsage()), MediaType.APPLICATION_JSON)
-							.comment("wu8685 sse momery monitor"));
-				} catch (Exception e) {
-					deadEmitters.add(se); // filter out dead emitters caused by
-											// network issue or client-closed by
-											// exception
-				}
+		deadEmitters.clear();
+		logger.debug("active sseEmitter is " + sseEmitters.size());
+		for (Entry<SseEmitter, Integer> entry : sseEmitters.entrySet()) {
+			SseEmitter se = entry.getKey();
+			try {
+				se.send(SseEmitter.event()
+						.id(String.valueOf(event.getTimestamp()))
+						.name("memory_info")
+						.data(new Memory(event.getTotal(), event.getUsage()), MediaType.APPLICATION_JSON)
+						.comment("wu8685 sse momery monitor"));
+			} catch (Exception e) {
+				deadEmitters.add(se); // filter out dead emitters caused by network issue or client-closed by exception
 			}
+		}
 
-			for (SseEmitter se : deadEmitters) {
-				sseEmitters.remove(se);
-			}
+		for (SseEmitter se : deadEmitters) {
+			sseEmitters.remove(se);
 		}
 	}
 
