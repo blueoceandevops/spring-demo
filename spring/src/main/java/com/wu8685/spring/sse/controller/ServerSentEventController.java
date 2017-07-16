@@ -1,6 +1,7 @@
 package com.wu8685.spring.sse.controller;
 
 import java.io.IOException;
+import java.lang.ref.WeakReference;
 import java.util.HashSet;
 import java.util.Map.Entry;
 import java.util.Set;
@@ -26,8 +27,8 @@ public class ServerSentEventController {
 
 	private static Logger logger = Logger.getLogger(ServerSentEventController.class);
 
-	private ConcurrentHashMap<SseEmitter, Integer> sseEmitters = new ConcurrentHashMap<>();
-	private Set<SseEmitter> deadEmitters = new HashSet<SseEmitter>();
+	private ConcurrentHashMap<WeakReference<SseEmitter>, Integer> sseEmitters = new ConcurrentHashMap<>();
+	private Set<WeakReference<SseEmitter>> deadEmitters = new HashSet<>();
 
 	@RequestMapping(path = "count", method = RequestMethod.GET)
 	@ApiOperation("get active sse emitters count")
@@ -38,11 +39,22 @@ public class ServerSentEventController {
 	@RequestMapping(path = "closeall", method = RequestMethod.POST)
 	@ApiOperation("clean all active sse emitters")
 	public String closeAllSseEmitters() {
-		for (Entry<SseEmitter, Integer> entry : sseEmitters.entrySet()) {
-			SseEmitter se = entry.getKey();
+		for (Entry<WeakReference<SseEmitter>, Integer> entry : sseEmitters.entrySet()) {
+			SseEmitter se = entry.getKey().get();
+			if (se == null) {
+				continue;
+			}
 			se.complete();
 			sseEmitters.remove(se);
 		}
+
+		return "success";
+	}
+
+	@RequestMapping(path = "gc", method = RequestMethod.POST)
+	@ApiOperation("trigger a gc")
+	public String manualGC() {
+		System.gc();
 
 		return "success";
 	}
@@ -62,7 +74,7 @@ public class ServerSentEventController {
 			logger.warn("complete one sse emitter with exception");
 		});
 
-		sseEmitters.put(sseEmitter, 1);
+		sseEmitters.put(new WeakReference<SseEmitter>(sseEmitter), 1);
 		return sseEmitter;
 	}
 
@@ -70,8 +82,14 @@ public class ServerSentEventController {
 	public void onApplicationEvent(MemoryEvent event) {
 		deadEmitters.clear();
 		logger.debug("active sseEmitter is " + sseEmitters.size());
-		for (Entry<SseEmitter, Integer> entry : sseEmitters.entrySet()) {
-			SseEmitter se = entry.getKey();
+		for (Entry<WeakReference<SseEmitter>, Integer> entry : sseEmitters.entrySet()) {
+			WeakReference<SseEmitter> key = entry.getKey();
+			SseEmitter se = key.get();
+			if (se == null) {
+				deadEmitters.add(key);
+				continue;
+			}
+
 			try {
 				se.send(SseEmitter.event()
 						.id(String.valueOf(event.getTimestamp()))
@@ -79,12 +97,14 @@ public class ServerSentEventController {
 						.data(new Memory(event.getTotal(), event.getUsage()), MediaType.APPLICATION_JSON)
 						.comment("wu8685 sse momery monitor"));
 			} catch (Exception e) {
-				deadEmitters.add(se); // filter out dead emitters caused by network issue or client-closed by exception
+				deadEmitters.add(key); // filter out dead emitters caused by
+										// network issue or client-closed by
+										// exception
 			}
 		}
 
-		for (SseEmitter se : deadEmitters) {
-			sseEmitters.remove(se);
+		for (WeakReference<SseEmitter> ref : deadEmitters) {
+			sseEmitters.remove(ref);
 		}
 	}
 
