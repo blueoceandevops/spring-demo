@@ -12,12 +12,16 @@ import org.springframework.http.MediaType;
 import org.springframework.http.server.ServerHttpResponse;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import com.wu8685.spring.event.pojo.MemoryEvent;
 
+import io.swagger.annotations.ApiOperation;
+
 @RestController
+@RequestMapping("sse")
 public class ServerSentEventController {
 
 	private static Logger logger = Logger.getLogger(ServerSentEventController.class);
@@ -25,7 +29,8 @@ public class ServerSentEventController {
 	private ConcurrentHashMap<SseEmitter, Integer> sseEmitters = new ConcurrentHashMap<>();
 	private Set<SseEmitter> deadEmitters = new HashSet<SseEmitter>();
 
-	@RequestMapping("sse/closeall")
+	@RequestMapping(path = "closeall", method = RequestMethod.POST)
+	@ApiOperation("clean all active sse emitters")
 	public String closeAllSseEmitters() {
 		for (Entry<SseEmitter, Integer> entry : sseEmitters.entrySet()) {
 			SseEmitter se = entry.getKey();
@@ -36,7 +41,8 @@ public class ServerSentEventController {
 		return "success";
 	}
 
-	@RequestMapping("/sse/memory")
+	@RequestMapping(path = "memory", method = RequestMethod.GET)
+	@ApiOperation("begin monitor server memory")
 	public SseEmitter serverSentEvent(@RequestHeader(name = "Last-Event-ID", required = false) String lastId)
 			throws IOException {
 		// keep connection timeout to 20s, defaultly 30s
